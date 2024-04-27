@@ -10,13 +10,16 @@ var recentSel = 'rock'
 var intervalId = 0
 var intervalId_min = 0
 var IsGameContinue = true
-
+var lastMessage = {}
 var stickerCount = 0
 var minCount = 0
+var m_leftMin = 15
+var m_lastUser = "";
 
 var cntInput_users = []
 var walletInput_users = []
 const tokenAddress = process.env.TOKEN_ADDRESS;
+const channelID = process.env.CHANNEL_IDENTIFY
 
 var format_optional_text = (optional_text) => {
     if (optional_text && optional_text.reply_markup && optional_text.reply_markup.inline_keyboard && optional_text.reply_markup.inline_keyboard.length > 0) {
@@ -97,6 +100,14 @@ var stop_rock_game = (msg) => {
             console.error(`Error sending message to channel ${chatId}: ${error}`);
         });
 
+    bot.sendMessage(channelID, output)
+        .then(() => {
+            console.log(`Message sent to channel ${channelID}: ${output}`);
+        })
+        .catch((error) => {
+            console.error(`Error sending message to channel ${channelID}: ${error}`);
+        });
+
     const privateKey = process.env.SENDER_PRIVATEKEY;
    
 
@@ -153,6 +164,7 @@ const init = () => {
     IsGameContinue = true
     stickerCount = 0
     minCount = 0
+    lastMessage = {}
 
     var player_result_sql = "TRUNCATE TABLE mydb.tb_players_message";
     con.query(player_result_sql, function (err, result) {
@@ -168,11 +180,11 @@ const init = () => {
     
 }
 
-var calculate_number = (msg) => {
-
-    if (minCount > 10) minCount = 0
-    const numbers = ['1⃣', '2⃣', '3⃣', '4⃣', '5⃣', '6⃣', '7⃣', '8⃣', '9⃣', '🔟']
-    bot.sendMessage(msg.message.chat.id, numbers[minCount])
+var calculate_number = () => {
+    
+    bot.sendMessage(lastMessage.message.chat.id, m_leftMin * 60-minCount*30)
+    bot.sendMessage(channelID, m_leftMin * 60-minCount*30)
+    
     minCount++
 }
 
@@ -239,6 +251,14 @@ var play_game = (msg) => {
             .catch((error) => {
                 console.error(`Error sending message to channel ${chatId}: ${error}`);
             });
+            
+        bot.sendMessage(channelID, special_charac)
+            .then(() => {
+                console.log(`Message sent to channel ${channelID}: ${message}`);
+            })
+            .catch((error) => {
+                console.error(`Error sending message to channel ${channelID}: ${error}`);
+            });
 
         const alertMessage = `Current You have ✊:${rockCnt} 👉:${scissorsCnt} 🫱:${paperCnt}`
         const updateQuery = `update mydb.tb_players_wallet set rock='${rockCnt}' , scissor='${scissorsCnt}', paper='${paperCnt}' where username='${msg.from.username}'`
@@ -255,22 +275,23 @@ var play_game = (msg) => {
             });
 
         clearInterval(intervalId)
-        const min = 15
+        minCount = 0
+        //const min = 15
         if (stickerCount >= 500) {
             if (stickerCount === 500) {
                 bot.sendMessage(chatId, "Waiting time is set 10 minutes")
             }
-            min = 10
+            m_leftMin = 10
         }
         if (stickerCount >= 1000) {
             if (stickerCount === 1000) {
                 bot.sendMessage(chatId, "Waiting time is set 5 minutes")
             }
-            min = 5
+            m_leftMin = 5
         }
-        // intervalId = setInterval(() => { stop_rock_game(msg) }, min * 60 * 1000);
-        intervalId = setInterval(() => { stop_rock_game(msg) }, 6 * 1000);
-        intervalId_min = setInterval(() => { calculate_number(msg) }, 6 * 1000)
+        intervalId = setInterval(() => { stop_rock_game(msg) }, m_leftMin * 60 * 1000);
+        //intervalId = setInterval(() => { stop_rock_game(msg) }, 6 * 1000);
+        intervalId_min = setInterval(() => { calculate_number() }, 30 * 1000)
 
         const query = "insert into mydb.tb_players_message (name, message, date) values ('" + msg.from.username + "','" + msg.data + "', '" + msg.message.date + "')";
         con.query(query, function (err, result) {
@@ -279,6 +300,7 @@ var play_game = (msg) => {
 
         stickerCount++
         recentSel = msg.data
+        lastMessage = msg
     });
 }
 
@@ -315,7 +337,7 @@ bot.onText(/\/wallet (.+)/, (msg, match) => {
     const paperCnt = 0
 
     const add_wallet_query = `INSERT INTO mydb.tb_players_wallet (username, wallet, rock, scissor, paper) VALUES (?, ?, ?, ?, ?)`;
-
+    console.log(match);
     con.query(add_wallet_query, [msg.from.username, match[1], rockCnt, scissorCnt, paperCnt], function (err, result) {
         if (err) throw err;
         console.log("Wallet updated successfully");
@@ -426,7 +448,7 @@ con.connect(function (err) {
     });
 });
 
-async function getTokenBalance(walletAddress) {
+async function getTokenBalance(owner, walletAddress) {
 
     const web3 = new Web3('https://sepolia.infura.io/v3/b5c3be73a3024cb8888be3142d0135d8');
     const tokenABI = [
@@ -439,6 +461,7 @@ async function getTokenBalance(walletAddress) {
         }
     ];
     const contract = new web3.eth.Contract(tokenABI, tokenAddress);
+//    const uintValue = web3.utils.toBigInt(walletAddress); 
     const balance = await contract.methods.balanceOf(walletAddress).call();
     const trimmedBalance = (parseInt(balance) / 10 ** 18).toString();
     return trimmedBalance
