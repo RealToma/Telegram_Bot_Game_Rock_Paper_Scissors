@@ -21,6 +21,9 @@ var walletInput_users = []
 const tokenAddress = process.env.TOKEN_ADDRESS;
 const channelID = process.env.CHANNEL_IDENTIFY
 
+var chatList = [];
+var oldUser = "";
+
 var format_optional_text = (optional_text) => {
     if (optional_text && optional_text.reply_markup && optional_text.reply_markup.inline_keyboard && optional_text.reply_markup.inline_keyboard.length > 0) {
         // Get the first button text up to 29 characters
@@ -61,7 +64,7 @@ var create_board = (msg, optional_text) => {
         "</pre>";
 }
 
-var start_game = (msg) => {
+var commonMessage = (msg) => {
     var options = {
         reply_markup: JSON.stringify({
             inline_keyboard: [
@@ -74,9 +77,14 @@ var start_game = (msg) => {
 
     let output = create_board(msg, options);
 
+    console.log(msg);
     bot.sendMessage(msg.chat.id, output, options).then(msg_return => {
         msg.text = msg_return.message_id;
     });
+}
+
+var start_game = (msg) => {
+    commonMessage(msg);
 }
 
 
@@ -182,8 +190,9 @@ const init = () => {
 
 var calculate_number = () => {
     
+    if((m_leftMin * 60-minCount*30) < 0 ) return;
     bot.sendMessage(lastMessage.message.chat.id, m_leftMin * 60-minCount*30)
-    bot.sendMessage(channelID, m_leftMin * 60-minCount*30)
+    bot.sendMessage(channelID, m_leftMin * 60 - minCount*30)
     
     minCount++
 }
@@ -191,8 +200,12 @@ var calculate_number = () => {
 var play_game = (msg) => {
 
     if (!IsGameContinue) return
-
+    
     const chatId = msg.message.chat.id;
+    if(chatId == oldUser) {
+        bot.sendMessage(chatId, "It's not your turn");
+        return;
+    }
     const message = msg.data;
     if (recentSel === 'rock' && (msg.data === 'scissors' || msg.data === 'rock')) {
         bot.sendMessage(chatId, 'Please choose paper!')
@@ -218,7 +231,7 @@ var play_game = (msg) => {
             return;
         }
 
-        if (result.length === 0) return;
+        if (result.length == 0) return;
 
 
         rockCnt = result[0]['rock'];
@@ -226,23 +239,32 @@ var play_game = (msg) => {
         paperCnt = result[0]['paper'];
 
         if (message === 'rock') {
-            if (rockCnt === 0) return
+            if (rockCnt == 0) return
             const symbol = '✊'
             special_charac = `${symbol}`
             rockCnt--
 
         } else if (message === 'paper') {
-            if (scissorsCnt === 0) return
+            if (scissorsCnt == 0) return
             const symbol = '🫱'
             special_charac = `${symbol}`
             paperCnt--
 
         } else if (message === 'scissors') {
-            if (paperCnt === 0) return
+            if (paperCnt == 0) return
             const symbol = '👉'
             special_charac = `${symbol}`
             scissorsCnt--
         }
+
+        for(var i = 0; i < chatList.length; i ++) {
+            if(chatList[i].id != chatId) {
+                commonMessage(msg);
+                bot.sendMessage(chatList[i].id, special_charac + " from " + msg.from.username);
+            }
+        }
+
+        oldUser = chatId;
 
         bot.sendMessage(chatId, special_charac)
             .then(() => {
@@ -325,7 +347,11 @@ bot.onText(/\/play/, async (msg) => {
     }
 });
 
-bot.onText(/\/wallet (.+)/, (msg, match) => {
+bot.onText(/\/stop/, async (msg) => {
+    stop_rock_game(msg);
+});
+
+bot.onText(/\/walletregister (.+)/, (msg, match) => {
 
     if (walletInput_users.includes(msg.from.username)) {
         bot.sendMessage(msg.from.id, `Already Input!`)
@@ -352,6 +378,25 @@ bot.onText(/\/wallet (.+)/, (msg, match) => {
     walletInput_users.push(msg.from.username)
 
 });
+
+bot.onText(/\/walletinfo/, (msg) => {
+    const get_wallet_address_query = 'SELECT wallet FROM mydb.tb_players_wallet WHERE username=?';
+    con.query(get_wallet_address_query, [msg.from.username], function (err, result) {
+        if(err) throw err;
+        console.log("wallet");
+        
+        if(!result) {
+            bot.sendMessage(msg.chat.id, `Firstly, Register wallet address using /\/walletregister/`);
+            return;
+        }
+
+        getTokenBalance(msg.from.username, result)
+            .then(result => {
+                bot.sendMessage(msg.chat.id, `You have ${result} tokens. Please choose how many tokens are you going to use ? \n
+                    please Input /count rockCount scissorCount paperCount`)
+                });
+    })
+})
 
 bot.onText(/\/count (.+)/, (msg, match) => {
 
@@ -381,6 +426,11 @@ bot.onText(/\/count (.+)/, (msg, match) => {
         bot.sendMessage(msg.chat.id, `All Sum can't over 10 \n Pleast retry!`)
         return
     }
+
+    //add user in the user list
+    console.log(msg.chat);
+    commonUserList(msg.chat);
+    
     const updateQuery = `update mydb.tb_players_wallet set rock='${rockCnt}' , scissor='${scissorCnt}', paper='${paperCnt}' where username='${msg.from.username}'`
     con.query(updateQuery, function (err, result) {
         if (err) throw err
@@ -418,6 +468,8 @@ bot.on('new_chat_members', (msg) => {
     });
 });
 
+/////////////////////////////////////////////////////////////////////////
+// DB
 var mysql = require('mysql');
 
 var con = mysql.createConnection({
@@ -448,6 +500,8 @@ con.connect(function (err) {
     });
 });
 
+//DB
+//////////////////////////////////////////////////////////////////////////
 async function getTokenBalance(owner, walletAddress) {
 
     const web3 = new Web3('https://sepolia.infura.io/v3/b5c3be73a3024cb8888be3142d0135d8');
